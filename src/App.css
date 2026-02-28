@@ -786,3 +786,99 @@ html, body, #root {
 .read-the-docs {
   color: #888;
 }
+
+/* ── Backend mode ── */
+
+.backend-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.phase-badge {
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 4px 10px;
+  border-radius: 20px;
+  background: #e2e8f0;
+  color: #2d3748;
+  text-transform: uppercase;
+}
+
+.phase-badge.phase-agent-led   { background: #bee3f8; color: #2b6cb0; }
+.phase-badge.phase-collaborative { background: #c6f6d5; color: #276749; }
+.phase-badge.phase-child-led   { background: #fefcbf; color: #744210; }
+
+.ws-status {
+  font-size: 0.8rem;
+  color: #718096;
+}
+
+.capture-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 24px 0;
+}
+
+.webcam-preview-large {
+  width: 320px;
+  height: 240px;
+  border-radius: 8px;
+  border: 2px solid #9fd1ff;
+  object-fit: cover;
+  background: #000;
+}
+
+.capture-btn {
+  font-size: 1.1rem;
+  padding: 12px 32px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #3182ce, #2b6cb0);
+  color: white;
+  border: none;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.capture-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.mic-status {
+  text-align: center;
+  font-size: 1rem;
+  color: #4a5568;
+  padding: 12px;
+  animation: monster-bob 1.4s ease-in-out infinite;
+}
+
+.session-summary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 48px 24px;
+  text-align: center;
+}
+
+.session-summary h2 {
+  font-size: 2rem;
+  color: #2d3748;
+}
+
+.session-summary p {
+  font-size: 1.2rem;
+  color: #4a5568;
+}
+
+.connecting-overlay {
+  font-size: 0.9rem;
+  color: #718096;
+  text-align: center;
+  padding: 8px;
+}

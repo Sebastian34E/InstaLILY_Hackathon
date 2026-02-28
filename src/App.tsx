@@ -1,15 +1,14 @@
-import React from 'react'
 import './App.css'
 import Card from './Card'
 import ProgressCircle from './ProgressCircle'
 import { Routes, Route, Link } from 'react-router-dom'
 import LessonPage from './LessonPage'
 
-// sample cards data
+// Each card carries a hardcoded problem sent to the backend as a worksheet image
 const cards = [
-  { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const },
-  { title: 'Times Table', description: 'Build multiplication speed and accuracy.', variant: 'times' as const },
-  { title: 'Addition', description: 'Strengthen addition facts and multi-digit sums.', variant: 'addition' as const },
+  { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const, dividend: 247, divisor: 6 },
+  { title: 'Times Table', description: 'Build multiplication speed and accuracy.', variant: 'times' as const, dividend: 144, divisor: 12 },
+  { title: 'Addition', description: 'Strengthen addition facts and multi-digit sums.', variant: 'addition' as const, dividend: 96, divisor: 8 },
 ];
 
 // training progress percentage
@@ -29,7 +28,12 @@ function Home() {
         <h2>Worksheet</h2>
         <div className="card-grid">
           {cards.map((card) => (
-            <Link key={card.title} to="/lesson" style={{ textDecoration: 'none' }}>
+            <Link
+              key={card.title}
+              to="/lesson"
+              state={{ dividend: card.dividend, divisor: card.divisor }}
+              style={{ textDecoration: 'none' }}
+            >
               <Card
                 title={card.title}
                 description={card.description}
