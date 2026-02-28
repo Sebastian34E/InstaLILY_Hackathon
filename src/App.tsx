@@ -1,34 +1,54 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
+import React from 'react'
 import './App.css'
+import Card from './Card'
+import ProgressCircle from './ProgressCircle'
+import { Routes, Route, Link } from 'react-router-dom'
+import LessonPage from './LessonPage'
+
+// sample cards data
+const cards = [
+  { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const },
+  { title: 'Times Table', description: 'Build multiplication speed and accuracy.', variant: 'times' as const },
+  { title: 'Addition', description: 'Strengthen addition facts and multi-digit sums.', variant: 'addition' as const },
+];
+
+// training progress percentage
+const trainingProgress = 60; // adjust as needed
+
+function Home() {
+  return (
+    <div className="homepage">
+      <header>
+        <h1>Hi InstaLily!</h1>
+        <p>Welcome to your homepage.</p>
+      </header>
+      <section className="progress-row">
+        <ProgressCircle label="Training Progress" percent={trainingProgress} />
+      </section>
+      <section className="card-section">
+        <h2>Worksheet</h2>
+        <div className="card-grid">
+          {cards.map((card) => (
+            <Link key={card.title} to="/lesson" style={{ textDecoration: 'none' }}>
+              <Card
+                title={card.title}
+                description={card.description}
+                variant={card.variant}
+              />
+            </Link>
+          ))}
+        </div>
+      </section>
+    </div>
+  )
+}
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/lesson" element={<LessonPage />} />
+    </Routes>
   )
 }
 
