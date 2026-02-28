@@ -1,10 +1,10 @@
 import React, { useMemo, useState, useRef, useCallback, useEffect } from "react";
-import { useLocation } from "react-router-dom";
 import Whiteboard from "./Whiteboard";
 import WhiteboardCanvas, { type WhiteboardCanvasRef } from "./WhiteboardCanvas";
 import { useWebSocket, type BackendAction } from "./hooks/useWebSocket";
 import { useSpeech } from "./hooks/useSpeech";
 import { useWebcam } from "./hooks/useWebcam";
+import worksheetData from "./division.json";
 
 type Question = {
   label: string;
@@ -16,44 +16,33 @@ type Question = {
 type PlacementStep = "none" | "outside" | "inside";
 type Phase = "AGENT_LED" | "COLLABORATIVE" | "CHILD_LED";
 
-const questions: Question[] = [
-  { label: "144 / 12", dividend: 144, divisor: 12, expectedQuotient: 12 },
-  { label: "987 / 3", dividend: 987, divisor: 3, expectedQuotient: 329 },
-  { label: "105 / 7", dividend: 105, divisor: 7, expectedQuotient: 15 },
-  { label: "936 / 8", dividend: 936, divisor: 8, expectedQuotient: 117 },
-];
+type Problem = { dividend: number; divisor: number };
+
+const questions: Question[] = worksheetData.worksheet.problems.map((p) => ({
+  label: `${p.dividend} ÷ ${p.divisor}`,
+  dividend: p.dividend,
+  divisor: p.divisor,
+  expectedQuotient: p.answer,
+}));
 
 function extractFirstInt(text: string): number | null {
   const m = text.match(/-?\d+/);
   return m ? Number(m[0]) : null;
 }
 
-function generateWorksheetImage(dividend: number, divisor: number): string {
-  const canvas = document.createElement("canvas");
-  canvas.width = 800;
-  canvas.height = 600;
-  const ctx = canvas.getContext("2d")!;
-  ctx.fillStyle = "white";
-  ctx.fillRect(0, 0, 800, 600);
-  ctx.fillStyle = "#333";
-  ctx.font = "24px Arial";
-  ctx.fillText("Math Worksheet — Long Division", 50, 60);
-  ctx.fillStyle = "black";
-  ctx.font = "bold 72px monospace";
-  ctx.fillText(`${dividend} ÷ ${divisor} = ?`, 100, 320);
-  return canvas.toDataURL("image/jpeg", 0.9).replace("data:image/jpeg;base64,", "");
-}
 
 const LessonPage: React.FC = () => {
-  // ── Problem from router state (set by clicking a card on the home page) ──
-  const location = useLocation();
-  const routeState = location.state as { dividend?: number; divisor?: number } | null;
-  const activeProblem = {
-    dividend: routeState?.dividend ?? 247,
-    divisor: routeState?.divisor ?? 6,
-  };
+  // ── Worksheet problems from backend ─────────────────────────────────────────
+  const [problems, setProblems] = useState<Problem[]>([]);
+  const [problemIndex, setProblemIndex] = useState(0);
+  // Refs so handleAction (memoized) can always see current values
+  const problemsRef = useRef<Problem[]>([]);
+  const problemIndexRef = useRef(0);
 
-  // ── Existing fallback state ──────────────────────────────────────────────
+  useEffect(() => { problemsRef.current = problems; }, [problems]);
+  useEffect(() => { problemIndexRef.current = problemIndex; }, [problemIndex]);
+
+  // ── Existing fallback state ──────────────────────────────────────────────────
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [chatInput, setChatInput] = useState("");
   const [showWhiteboard, setShowWhiteboard] = useState(false);
@@ -65,7 +54,7 @@ const LessonPage: React.FC = () => {
   const [hasCorrectAnswer, setHasCorrectAnswer] = useState(false);
   const [requiresSetup, setRequiresSetup] = useState(false);
 
-  // ── Backend mode state ───────────────────────────────────────────────────
+  // ── Backend mode state ───────────────────────────────────────────────────────
   const [phase, setPhase] = useState<Phase>("AGENT_LED");
   const [sessionActive, setSessionActive] = useState(false);
   const [sessionDone, setSessionDone] = useState(false);
@@ -76,6 +65,8 @@ const LessonPage: React.FC = () => {
 
   const whiteboardRef = useRef<WhiteboardCanvasRef>(null);
   const speakRef = useRef<(text: string) => void>(() => {});
+  // sendRef avoids stale closure in handleAction
+  const sendRef = useRef<((msg: object) => void) | null>(null);
 
   const handleAction = useCallback((action: BackendAction) => {
     switch (action.type) {
@@ -85,13 +76,25 @@ const LessonPage: React.FC = () => {
       case "SHIFT_CONTROL":
         setPhase(action.to as Phase);
         break;
-      case "SHOW_SUMMARY":
-        setSessionDone(true);
-        setSummary({
-          problems_done: action.problems_done as number,
-          confidence_end: action.confidence_end as number,
-        });
+      case "SHOW_SUMMARY": {
+        // Advance to next problem if available
+        const nextIdx = problemIndexRef.current + 1;
+        if (nextIdx < problemsRef.current.length) {
+          setProblemIndex(nextIdx);
+          problemIndexRef.current = nextIdx;
+          const next = problemsRef.current[nextIdx];
+          sendRef.current?.({ type: "START_PROBLEM", dividend: next.dividend, divisor: next.divisor });
+          // Reset whiteboard for new problem
+          whiteboardRef.current?.execute({ type: "DRAW_PROBLEM", dividend: next.dividend, divisor: next.divisor } as BackendAction);
+        } else {
+          setSessionDone(true);
+          setSummary({
+            problems_done: action.problems_done as number,
+            confidence_end: action.confidence_end as number,
+          });
+        }
         break;
+      }
       default:
         if (action.type.startsWith("DRAW_")) {
           whiteboardRef.current?.execute(action);
@@ -101,6 +104,8 @@ const LessonPage: React.FC = () => {
 
   const wsUrl = (import.meta.env.VITE_WS_URL as string | undefined) ?? "";
   const { send, wsStatus } = useWebSocket(wsUrl, handleAction);
+  sendRef.current = send;
+
   const { speak } = useSpeech(send, sessionActive && !sessionDone);
   speakRef.current = speak;
   const { videoRef, hiddenCanvasRef } = useWebcam(
@@ -108,17 +113,46 @@ const LessonPage: React.FC = () => {
     sessionActive && !sessionDone
   );
 
-  // Auto-start: send the hardcoded problem image as soon as WS connects
+  // Fetch problem list from backend HTTP endpoint
+  useEffect(() => {
+    if (!wsUrl) return;
+    const httpBase = wsUrl.replace(/^wss?:\/\//, "https://").replace(/\/ws$/, "");
+    fetch(`${httpBase}/problems`)
+      .then((r) => r.json())
+      .then((data: Problem[]) => {
+        if (Array.isArray(data) && data.length > 0) {
+          setProblems(data);
+          problemsRef.current = data;
+        }
+      })
+      .catch(() => {/* silently fall back */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsUrl]);
+
+  // Auto-start: send the first problem as soon as WS connects
   useEffect(() => {
     if (wsStatus === "connected" && !sessionActive) {
-      const image = generateWorksheetImage(activeProblem.dividend, activeProblem.divisor);
-      send({ type: "WORKSHEET_PHOTO", image });
+      const first = problemsRef.current[0] ?? { dividend: 247, divisor: 6 };
+      send({ type: "START_PROBLEM", dividend: first.dividend, divisor: first.divisor });
       setSessionActive(true);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [wsStatus]);
 
-  // ── Fallback (existing) logic ─────────────────────────────────────────────
+  // ── Next Problem (manual fallback) ───────────────────────────────────────────
+  const handleNextProblem = () => {
+    const nextIdx = problemIndexRef.current + 1;
+    if (nextIdx < problemsRef.current.length) {
+      setProblemIndex(nextIdx);
+      problemIndexRef.current = nextIdx;
+      const next = problemsRef.current[nextIdx];
+      send({ type: "START_PROBLEM", dividend: next.dividend, divisor: next.divisor });
+    }
+  };
+  const hasNextProblem = problems.length > 0 && problemIndex < problems.length - 1;
+  const activeProblem = problems[problemIndex];
+
+  // ── Fallback (existing) logic ─────────────────────────────────────────────────
   const question = questions[currentQuestion];
   const dividendStr = useMemo(() => String(question.dividend), [question.dividend]);
   const divisorStr = useMemo(() => String(question.divisor), [question.divisor]);
@@ -202,25 +236,12 @@ const LessonPage: React.FC = () => {
         : null
       : null;
 
-  // ── Backend mode render ───────────────────────────────────────────────────
+  // ── Backend mode render ───────────────────────────────────────────────────────
   const backendConfigured = wsUrl !== "";
 
-  // If backend is configured but exhausted all retries, show explicit error
-  if (backendConfigured && wsStatus === "disconnected") {
-    return (
-      <div className="lesson-page">
-        <div className="lesson-content">
-          <div className="session-summary">
-            <h2>Backend Unreachable</h2>
-            <p>Could not connect to the tutoring server.</p>
-            <p>Check that the backend is running and reload the page.</p>
-          </div>
-        </div>
-      </div>
-    );
-  }
+  // When backend is configured but unreachable, fall through to the local fallback UI
 
-  if (backendConfigured) {
+  if (backendConfigured && wsStatus !== "disconnected") {
     const phaseCss = phase.toLowerCase().replace(/_/g, "-");
     return (
       <div className="lesson-page">
@@ -245,6 +266,16 @@ const LessonPage: React.FC = () => {
             <span className={`phase-badge phase-${phaseCss}`}>
               {phase.replace(/_/g, " ")}
             </span>
+            {problems.length > 0 && !sessionDone && (
+              <span className="problem-counter">
+                Problem {problemIndex + 1} of {problems.length}
+                {activeProblem && (
+                  <span className="problem-label">
+                    {" "}— {activeProblem.dividend} ÷ {activeProblem.divisor}
+                  </span>
+                )}
+              </span>
+            )}
             {wsStatus === "connecting" && (
               <span className="ws-status">Connecting…</span>
             )}
@@ -264,6 +295,11 @@ const LessonPage: React.FC = () => {
             <>
               <WhiteboardCanvas ref={whiteboardRef} />
               <div className="mic-status">🎤 Listening for your answer…</div>
+              {hasNextProblem && (
+                <button className="next-problem-btn" onClick={handleNextProblem}>
+                  Next Problem →
+                </button>
+              )}
             </>
           )}
         </div>
@@ -271,7 +307,7 @@ const LessonPage: React.FC = () => {
     );
   }
 
-  // ── Fallback render (existing, unchanged) ────────────────────────────────
+  // ── Fallback render (existing, unchanged) ─────────────────────────────────────
   return (
     <div className="lesson-page">
       <div className="lesson-content">

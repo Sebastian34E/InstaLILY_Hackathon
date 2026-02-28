@@ -882,3 +882,33 @@ html, body, #root {
   text-align: center;
   padding: 8px;
 }
+
+/* ── Problem counter & next button ── */
+
+.problem-counter {
+  font-size: 0.9rem;
+  color: #4a5568;
+  margin-left: 12px;
+}
+
+.problem-label {
+  font-weight: 600;
+  color: #2d3748;
+}
+
+.next-problem-btn {
+  display: block;
+  margin: 16px auto 0;
+  padding: 10px 24px;
+  background: #4299e1;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.next-problem-btn:hover {
+  background: #3182ce;
+}

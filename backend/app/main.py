@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,17 +13,19 @@ from app.models import parse_event
 from app.session import TutoringSession
 from app.policy import TutoringPolicy
 from app.model_server import MathTutorModelServer
+from app.worksheet_parser import parse_worksheet
 
 logger = logging.getLogger(__name__)
 
 model_server: MathTutorModelServer | None = None
 policy: TutoringPolicy | None = None
 session: TutoringSession | None = None
+worksheet_problems: list[dict] = []
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global model_server, policy, session
+    global model_server, policy, session, worksheet_problems
     logger.info("Loading models...")
     model_server = MathTutorModelServer(
         gemma12b_base=os.getenv("GEMMA12B_BASE", "google/gemma-3-12b-it"),
@@ -37,6 +40,10 @@ async def lifespan(app: FastAPI):
         collaborative_threshold=int(os.getenv("COLLAB_THRESHOLD", "3")),
     )
     session = TutoringSession()
+    # Load worksheet problems from PDF
+    pdf_path = Path(os.getenv("WORKSHEET_PDF", "worksheets/grade-4-long-division-basic-facts-a.pdf"))
+    worksheet_problems = parse_worksheet(pdf_path)
+    logger.info("Loaded %d worksheet problems", len(worksheet_problems))
     logger.info("Ready.")
     yield
     logger.info("Shutting down.")
@@ -51,6 +58,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/problems")
+async def get_problems():
+    """Return the ordered list of worksheet problems."""
+    return worksheet_problems
 
 
 @app.get("/health")

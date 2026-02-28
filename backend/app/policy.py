@@ -4,7 +4,7 @@ import logging
 from app.session import TutoringSession, TutoringPhase
 from app.models import (
     Action, Event,
-    WorksheetPhotoEvent, StudentSpeechEvent, FaceFrameEvent,
+    WorksheetPhotoEvent, StudentSpeechEvent, FaceFrameEvent, StartProblemEvent,
     DrawProblemAction, DrawCircleAction, DrawNumberAction,
     DrawMultiplyAction, DrawLineAction, DrawBringDownAction,
     DrawRemainderAction, DrawHintAction, SpeakAction,
@@ -35,6 +35,8 @@ class TutoringPolicy:
         match event:
             case WorksheetPhotoEvent():
                 return await self._on_worksheet(event, session)
+            case StartProblemEvent():
+                return await self._on_start_problem(event, session)
             case StudentSpeechEvent():
                 return await self._on_speech(event, session)
             case FaceFrameEvent():
@@ -51,6 +53,17 @@ class TutoringPolicy:
                 ShowSummaryAction(problems_done=0, confidence_end=0.0),
             ]
         session.queue_problems(problems)
+        return await self._start_next_problem(session)
+
+    async def _on_start_problem(self, event: StartProblemEvent, session: TutoringSession) -> list[Action]:
+        """Directly start tutoring a specific problem — no image analysis needed."""
+        problem = {
+            "dividend": event.dividend,
+            "divisor": event.divisor,
+            "student_answer": "unknown",
+            "error_type": "needs_guidance",
+        }
+        session.queue_problems([problem])
         return await self._start_next_problem(session)
 
     async def _start_next_problem(self, session: TutoringSession) -> list[Action]:

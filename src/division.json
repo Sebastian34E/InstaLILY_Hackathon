@@ -1,0 +1,25 @@
+{
+  "worksheet": {
+    "title": "Long Division: Basic Division Facts",
+    "grade": 4,
+    "source": "k5learning.com",
+    "instruction": "Find the quotient.",
+    "problems": [
+      { "id": 1, "divisor": 2, "dividend": 20, "answer": 10 },
+      { "id": 2, "divisor": 12, "dividend": 108, "answer": 9 },
+      { "id": 3, "divisor": 3, "dividend": 24, "answer": 8 },
+      { "id": 4, "divisor": 8, "dividend": 64, "answer": 8 },
+      { "id": 5, "divisor": 7, "dividend": 56, "answer": 8 },
+      { "id": 6, "divisor": 6, "dividend": 24, "answer": 4 },
+      { "id": 7, "divisor": 10, "dividend": 120, "answer": 12 },
+      { "id": 8, "divisor": 5, "dividend": 15, "answer": 3 },
+      { "id": 9, "divisor": 11, "dividend": 77, "answer": 7 },
+      { "id": 10, "divisor": 9, "dividend": 63, "answer": 7 },
+      { "id": 11, "divisor": 2, "dividend": 14, "answer": 7 },
+      { "id": 12, "divisor": 5, "dividend": 30, "answer": 6 },
+      { "id": 13, "divisor": 2, "dividend": 6, "answer": 3 },
+      { "id": 14, "divisor": 9, "dividend": 81, "answer": 9 },
+      { "id": 15, "divisor": 3, "dividend": 9, "answer": 3 }
+    ]
+  }
+}

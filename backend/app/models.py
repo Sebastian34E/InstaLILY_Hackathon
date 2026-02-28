@@ -23,12 +23,19 @@ class FaceFrameEvent(BaseModel):
     t: float = 0.0
 
 
-Event = Union[WorksheetPhotoEvent, StudentSpeechEvent, FaceFrameEvent]
+class StartProblemEvent(BaseModel):
+    type: Literal["START_PROBLEM"]
+    dividend: int
+    divisor: int
+
+
+Event = Union[WorksheetPhotoEvent, StudentSpeechEvent, FaceFrameEvent, StartProblemEvent]
 
 _EVENT_MAP: dict[str, type] = {
     "WORKSHEET_PHOTO": WorksheetPhotoEvent,
     "STUDENT_SPEECH": StudentSpeechEvent,
     "FACE_FRAME": FaceFrameEvent,
+    "START_PROBLEM": StartProblemEvent,
 }
 
 

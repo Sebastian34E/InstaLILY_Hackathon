@@ -4,11 +4,9 @@ import ProgressCircle from './ProgressCircle'
 import { Routes, Route, Link } from 'react-router-dom'
 import LessonPage from './LessonPage'
 
-// Each card carries a hardcoded problem sent to the backend as a worksheet image
+// Single worksheet card — problems loaded from backend PDF at runtime
 const cards = [
-  { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const, dividend: 247, divisor: 6 },
-  { title: 'Times Table', description: 'Build multiplication speed and accuracy.', variant: 'times' as const, dividend: 144, divisor: 12 },
-  { title: 'Addition', description: 'Strengthen addition facts and multi-digit sums.', variant: 'addition' as const, dividend: 96, divisor: 8 },
+  { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const },
 ];
 
 // training progress percentage
@@ -31,7 +29,6 @@ function Home() {
             <Link
               key={card.title}
               to="/lesson"
-              state={{ dividend: card.dividend, divisor: card.divisor }}
               style={{ textDecoration: 'none' }}
             >
               <Card
