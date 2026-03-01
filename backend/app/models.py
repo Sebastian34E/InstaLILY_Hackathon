@@ -80,6 +80,8 @@ class DrawLineAction(BaseModel):
 class DrawBringDownAction(BaseModel):
     type: Literal["DRAW_BRING_DOWN"] = "DRAW_BRING_DOWN"
     digit_index: int
+    digit: int | None = None           # the digit value being brought down, e.g. 4
+    working_number: int | None = None  # combined number at the working row, e.g. 24
 
 
 class DrawRemainderAction(BaseModel):

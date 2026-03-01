@@ -189,6 +189,18 @@ class TutoringPolicy:
         if session.phase not in (TutoringPhase.AGENT_LED, TutoringPhase.COLLABORATIVE, TutoringPhase.CHILD_LED):
             return []
         result = await self.model_server.analyze_face(event.image)
+
+        # Looking-away detection — frames arrive every 30 s, so 2 consecutive ≈ 1 minute away
+        if result.get("looking_away", False):
+            session.away_frames += 1
+            if session.away_frames >= 2:
+                session.away_frames = 0  # reset so we don't spam every subsequent frame
+                return [SpeakAction(text="Hey! Come back — we're still working on this problem together.")]
+            return []
+
+        # Face is back in frame — reset the away counter
+        session.away_frames = 0
+
         if not result.get("frustrated", False):
             return []
         # Downgrade phase on frustration
@@ -210,7 +222,11 @@ class TutoringPolicy:
                 elif t == "DRAW_LINE":
                     result.append(DrawLineAction(position=cmd["position"]))
                 elif t == "DRAW_BRING_DOWN":
-                    result.append(DrawBringDownAction(digit_index=cmd["digit_index"]))
+                    result.append(DrawBringDownAction(
+                        digit_index=cmd["digit_index"],
+                        digit=cmd.get("digit"),
+                        working_number=cmd.get("working_number"),
+                    ))
                 elif t == "DRAW_REMAINDER":
                     result.append(DrawRemainderAction(value=cmd["value"]))
                 elif t == "DRAW_CIRCLE":

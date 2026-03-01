@@ -19,8 +19,12 @@ const LINE_ROWS: Record<string, number> = {
   subtract_line_1: 240,
 };
 
+// Working rows below each subtract line — up to 3 bring-down levels
+const WORKING_ROW_Y = [185, 275, 365] as const;
+
 const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef>((_, ref) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const stateRef = useRef({ bringDownCount: 0 });
 
   function getCtx() {
     return canvasRef.current?.getContext("2d") ?? null;
@@ -35,6 +39,7 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef>((_, ref) => {
         case "DRAW_PROBLEM": {
           const dividend = action.dividend as number;
           const divisor = action.divisor as number;
+          stateRef.current.bringDownCount = 0;
           c.clearRect(0, 0, 600, 480);
 
           // Divisor
@@ -110,21 +115,42 @@ const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef>((_, ref) => {
 
         case "DRAW_BRING_DOWN": {
           const idx = action.digit_index as number;
+          const workingNumber = action.working_number as number | undefined | null;
           const fromX = 200 + idx * 50;
+
+          // Pick working row based on how many bring-downs have happened so far
+          const level = stateRef.current.bringDownCount;
+          const toY = WORKING_ROW_Y[level] ?? WORKING_ROW_Y[WORKING_ROW_Y.length - 1];
+          stateRef.current.bringDownCount += 1;
+
+          // Curved arrow from the dividend digit down to the working row
+          const midY = (95 + toY - 15) / 2;
           c.strokeStyle = "#e53e3e";
           c.lineWidth = 2;
           c.beginPath();
-          c.moveTo(fromX, 100);
-          c.quadraticCurveTo(fromX + 25, 155, fromX, 185);
+          c.moveTo(fromX, 95);
+          c.quadraticCurveTo(fromX + 22, midY, fromX, toY - 15);
           c.stroke();
-          // Arrowhead
+
+          // Arrowhead pointing down
           c.fillStyle = "#e53e3e";
           c.beginPath();
-          c.moveTo(fromX, 185);
-          c.lineTo(fromX - 6, 172);
-          c.lineTo(fromX + 6, 172);
+          c.moveTo(fromX, toY - 3);
+          c.lineTo(fromX - 6, toY - 16);
+          c.lineTo(fromX + 6, toY - 16);
           c.closePath();
           c.fill();
+
+          // Write the working number (remainder + brought-down digit) at the working row
+          if (workingNumber != null) {
+            c.font = "bold 28px monospace";
+            c.fillStyle = "#1a1a1a";
+            c.textAlign = "right";
+            c.textBaseline = "alphabetic";
+            // Right-align so the last digit lines up under the brought-down digit
+            c.fillText(String(workingNumber), fromX + 25, toY);
+          }
+
           c.fillStyle = "#1a1a1a";
           break;
         }

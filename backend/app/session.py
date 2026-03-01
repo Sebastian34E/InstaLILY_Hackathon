@@ -27,6 +27,7 @@ class TutoringSession:
     phase_history: list = field(default_factory=list)
     conversation_history: list = field(default_factory=list)
     frustrated: bool = False
+    away_frames: int = 0  # consecutive face frames where student was not looking at screen
 
     def add_history(self, role: str, text: str) -> None:
         self.conversation_history.append({"role": role, "text": text})

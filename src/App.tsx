@@ -16,7 +16,7 @@ function Home() {
   return (
     <div className="homepage">
       <header>
-        <h1>Hi InstaLily!</h1>
+        <h1>Welcome to InstaTutor!</h1>
       </header>
       <section className="progress-row">
         <ProgressCircle label="Training Progress" percent={trainingProgress} />

@@ -119,18 +119,23 @@ class MathTutorModelServer:
             return []
 
     async def analyze_face(self, image_b64: str) -> dict[str, Any]:
-        """Detect frustration/engagement from webcam frame."""
+        """Detect frustration/engagement and whether the student is looking at the screen."""
         try:
             img = self._decode_image(image_b64)
             prompt = (
-                "You see a child's face during a tutoring session.\n"
-                'Respond ONLY with valid JSON: {"frustrated": true/false, "engaged": true/false}'
+                "You see a webcam frame from a child's math tutoring session.\n"
+                "Answer two questions:\n"
+                "1. looking_away: true if no face is clearly visible, the face is turned away from the camera, "
+                "or the child has left the frame. false if a face is present and facing the screen.\n"
+                "2. frustrated: true only if a face IS visible and shows clear signs of frustration "
+                "(furrowed brow, tears, head in hands). false otherwise.\n"
+                'Respond ONLY with valid JSON: {"looking_away": true/false, "frustrated": true/false}'
             )
             raw = await self._gemma_generate(prompt=prompt, images=[img] if img else [])
-            return self._parse_json(raw, fallback={"frustrated": False, "engaged": True})
+            return self._parse_json(raw, fallback={"looking_away": False, "frustrated": False})
         except Exception as e:
             logger.warning("analyze_face failed: %s", e)
-            return {"frustrated": False, "engaged": True}
+            return {"looking_away": False, "frustrated": False}
 
     async def classify_response(self, response: str, context: dict) -> dict[str, Any]:
         """

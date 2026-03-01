@@ -236,7 +236,24 @@ const LessonPage: React.FC = () => {
     return (
       <div className="lesson-page">
         {/* Hidden face-frame infrastructure */}
-        <video ref={videoRef} autoPlay muted playsInline style={{ display: "none" }} />
+        <video
+          ref={videoRef}
+          autoPlay
+          muted
+          playsInline
+          style={{
+            position: "fixed",
+            bottom: "16px",
+            right: "16px",
+            width: "160px",
+            height: "120px",
+            objectFit: "cover",
+            borderRadius: "10px",
+            border: "2px solid #9fd1ff",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.25)",
+            zIndex: 100,
+          }}
+        />
         <canvas ref={hiddenCanvasRef} width={320} height={240} style={{ display: "none" }} />
 
         {/* Header strip — sits outside lesson-content so it's always at top */}
