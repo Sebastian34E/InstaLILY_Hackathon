@@ -4,7 +4,7 @@ import asyncio
 import base64
 import json
 import logging
-import random
+import re
 from io import BytesIO
 from typing import Any
 
@@ -12,17 +12,33 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-_FALLBACK_PROBLEMS = [
-    {"dividend": 84, "divisor": 4, "student_answer": "20", "error_type": "incomplete_quotient"},
-    {"dividend": 126, "divisor": 3, "student_answer": "40", "error_type": "carry_error"},
+_FALLBACK_TUTORING_STEPS = [
+    {"speech": "Let's start. Look at the first digit of the dividend. How many times does the divisor go into it?", "drawing_commands": []},
+    {"speech": "Think about how many times the divisor fits. Multiply it and subtract.", "drawing_commands": []},
 ]
 
-_FALLBACK_TUTORING_STEPS = [
-    {"speech": "Let's look at this problem together. What's the first thing we do in long division?",
-     "drawing_commands": []},
-    {"speech": "Can the divisor go into just the first digit?",
-     "drawing_commands": [{"type": "DRAW_CIRCLE", "target": "first_digit"}]},
-]
+
+def _compute_division_steps(dividend: int, divisor: int) -> str:
+    """Return a human-readable walkthrough of the long division steps."""
+    digits = [int(d) for d in str(dividend)]
+    steps = []
+    current = 0
+    quotient_digits = []
+    for i, digit in enumerate(digits):
+        current = current * 10 + digit
+        q = current // divisor
+        product = q * divisor
+        remainder = current - product
+        quotient_digits.append(str(q))
+        steps.append(
+            f"  Step {i+1}: Bring down {digit} → working number is {current}. "
+            f"{current} ÷ {divisor} = {q}. Write {q}. "
+            f"{q} × {divisor} = {product}. {current} − {product} = {remainder}."
+        )
+        current = remainder
+    answer = "".join(quotient_digits).lstrip("0") or "0"
+    steps.append(f"  Final answer: {answer}, remainder {current}.")
+    return "\n".join(steps)
 
 
 class MathTutorModelServer:
@@ -86,14 +102,14 @@ class MathTutorModelServer:
     # ── Public async API ──────────────────────────────────────────────────────
 
     async def read_worksheet(self, image_b64: str) -> list[dict]:
-        """Read worksheet photo. Returns list of wrong problems found."""
+        """Read worksheet photo and return the problems visible on it."""
         try:
             img = self._decode_image(image_b64)
             prompt = (
-                "You are a math teacher. This image shows a student's completed worksheet.\n"
-                "Find all INCORRECT long division problems. For each wrong answer return:\n"
-                '{"dividend": int, "divisor": int, "student_answer": "string", "error_type": "string"}\n'
-                "Return ONLY a valid JSON array. If all answers are correct return []."
+                "This image shows a math worksheet with long division problems.\n"
+                "List every problem you can see. For each one return:\n"
+                '{"dividend": int, "divisor": int, "student_answer": "string or unknown", "error_type": "needs_guidance"}\n'
+                "Return ONLY a valid JSON array."
             )
             raw = await self._gemma_generate(prompt=prompt, images=[img] if img else [])
             result = self._parse_json(raw, fallback=[])
@@ -117,37 +133,109 @@ class MathTutorModelServer:
             return {"frustrated": False, "engaged": True}
 
     async def classify_response(self, response: str, context: dict) -> dict[str, Any]:
-        """Classify student response quality. Called by FunctionGemma."""
+        """
+        Classify the student's response for the current problem step.
+        The full worked solution is injected so the model can check correctness.
+        """
         try:
+            problem = context.get("problem") or {}
+            dividend = problem.get("dividend", 0)
+            divisor = problem.get("divisor", 1)
+            phase = context.get("phase", "AGENT_LED")
+            history = context.get("history", [])
+
+            solution = _compute_division_steps(dividend, divisor)
+            correct_answer = dividend // divisor
+            remainder = dividend % divisor
+
+            history_text = ""
+            if history:
+                lines = [f"  {h['role'].upper()}: {h['text']}" for h in history[-6:]]
+                history_text = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
+
             prompt = (
-                f"Math tutoring context: {json.dumps(context)}\n"
-                f"Student said: '{response}'\n\n"
-                "Classify the response. Return ONLY valid JSON:\n"
+                f"You are evaluating a student's response during a long division tutoring session.\n\n"
+                f"Problem: {dividend} ÷ {divisor}\n"
+                f"Correct solution:\n{solution}\n\n"
+                f"{history_text}"
+                f"Student just said: \"{response}\"\n\n"
+                f"Teaching phase: {phase}\n\n"
+                "Decide:\n"
+                "- Is the student's response correct or on the right track for the CURRENT step?\n"
+                "- Give a short, encouraging 1-sentence reply that either confirms they're right or gently corrects them.\n"
+                "- Do NOT give away the full answer if they're wrong — just guide them to the next small step.\n\n"
+                "Return ONLY valid JSON (no markdown):\n"
                 '{"quality": "confident_correct|hesitant_correct|hesitant_wrong|fundamentally_wrong", '
-                '"next_draw": [], "speech": "one sentence response to student"}'
+                '"speech": "your 1-sentence response to the student", "next_draw": []}'
             )
             raw = await self._gemma_generate(prompt=prompt, images=[])
-            return self._parse_json(raw, fallback=self._fallback_classify(response))
+            result = self._parse_json(raw, fallback=None)
+            if result is None:
+                return self._fallback_classify(response, correct_answer, remainder)
+            return result
         except Exception as e:
             logger.warning("classify_response failed: %s", e)
-            return self._fallback_classify(response)
+            problem = context.get("problem") or {}
+            return self._fallback_classify(
+                response,
+                problem.get("dividend", 0) // max(problem.get("divisor", 1), 1),
+                problem.get("dividend", 0) % max(problem.get("divisor", 1), 1),
+            )
 
     async def generate_tutoring_step(self, problem: dict, phase: Any, history: list) -> dict[str, Any]:
-        """Generate next tutoring action for the current problem state."""
+        """
+        Generate the next tutoring step.
+        Injects the full worked solution so Gemma can guide concretely
+        without doing arithmetic itself.
+        """
         try:
+            dividend = problem['dividend']
+            divisor = problem['divisor']
+
+            solution = _compute_division_steps(dividend, divisor)
+
+            history_text = ""
+            if history:
+                lines = [f"  {h['role'].upper()}: {h['text']}" for h in history[-6:]]
+                history_text = "Conversation so far:\n" + "\n".join(lines) + "\n\n"
+
+            phase_str = str(phase).split(".")[-1]
+            phase_instruction = {
+                "AGENT_LED": (
+                    "You are leading. Walk through ONE step of the solution concretely. "
+                    "Then ask ONE simple yes/no or short-answer question to check understanding."
+                ),
+                "COLLABORATIVE": (
+                    "Ask the student what the next step is. Give a hint referencing the specific numbers if they're unsure."
+                ),
+                "CHILD_LED": (
+                    "The student is working independently. Only speak if they seem stuck. "
+                    "Give a minimal nudge."
+                ),
+            }.get(phase_str, "Walk through ONE step and ask the student to confirm.")
+
             prompt = (
-                f"You are tutoring a student on long division: {problem['dividend']} ÷ {problem['divisor']}.\n"
-                f"Their original answer was: {problem.get('student_answer', 'unknown')}.\n"
-                f"Current teaching phase: {phase}. History: {history[-3:] if history else []}\n\n"
-                "Generate the next tutoring step. Return ONLY valid JSON:\n"
-                '{"speech": "what to say to the student", '
-                '"drawing_commands": [list of drawing command objects]}'
+                f"You are a patient, encouraging math tutor helping a student (age 10-13) "
+                f"solve {dividend} ÷ {divisor}.\n\n"
+                f"The complete correct solution is:\n{solution}\n\n"
+                f"{history_text}"
+                f"Teaching mode: {phase_instruction}\n\n"
+                "Rules:\n"
+                "- Use the solution above to be specific about numbers (e.g. 'How many times does 6 go into 20?').\n"
+                "- Do NOT repeat anything already said in the conversation.\n"
+                "- ONE step at a time. ONE question at a time. Wait for the student.\n"
+                "- Keep it to 1-2 sentences. Simple language.\n\n"
+                "Return ONLY valid JSON (no markdown):\n"
+                '{"speech": "your tutoring sentence here", "drawing_commands": []}'
             )
             raw = await self._gemma_generate(prompt=prompt, images=[])
-            return self._parse_json(raw, fallback=random.choice(_FALLBACK_TUTORING_STEPS))
+            result = self._parse_json(raw, fallback=None)
+            if result and result.get("speech"):
+                return result
+            return _FALLBACK_TUTORING_STEPS[len(history) % len(_FALLBACK_TUTORING_STEPS)]
         except Exception as e:
             logger.warning("generate_tutoring_step failed: %s", e)
-            return random.choice(_FALLBACK_TUTORING_STEPS)
+            return _FALLBACK_TUTORING_STEPS[len(history) % len(_FALLBACK_TUTORING_STEPS)]
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
@@ -160,7 +248,7 @@ class MathTutorModelServer:
             for img in images:
                 messages[0]["content"].append({"type": "image", "image": img})
             messages[0]["content"].append({"type": "text", "text": prompt})
-            out = self._pipe(messages, max_new_tokens=512)
+            out = self._pipe(messages, max_new_tokens=256)
             return out[0]["generated_text"][-1]["content"]
 
         return await asyncio.get_running_loop().run_in_executor(None, _run)
@@ -175,9 +263,10 @@ class MathTutorModelServer:
 
     def _parse_json(self, raw: str, fallback: Any) -> Any:
         try:
+            # Strip markdown code fences if present
+            raw = re.sub(r"```(?:json)?", "", raw).strip()
             obj_start = raw.find("{")
             arr_start = raw.find("[")
-            # Pick whichever opening bracket appears first
             if obj_start == -1 and arr_start == -1:
                 return fallback
             if obj_start == -1:
@@ -193,11 +282,17 @@ class MathTutorModelServer:
         except Exception:
             return fallback
 
-    def _fallback_classify(self, response: str) -> dict:
-        positive = {"yes", "right", "times", "bring", "down", "divide", "remainder", "subtract"}
-        correct = bool(set(response.lower().split()) & positive)
+    def _fallback_classify(self, response: str, correct_answer: int, remainder: int) -> dict:
+        """Numerically check if the student's response matches the correct answer."""
+        nums = [int(m) for m in re.findall(r"\d+", response)]
+        if correct_answer in nums or (remainder > 0 and remainder in nums):
+            return {
+                "quality": "confident_correct",
+                "next_draw": [],
+                "speech": "That's right! Good work.",
+            }
         return {
-            "quality": "confident_correct" if correct else "hesitant_wrong",
+            "quality": "hesitant_wrong",
             "next_draw": [],
-            "speech": "Good thinking!" if correct else "Let me help you with that step.",
+            "speech": "Not quite — let's think through this step together.",
         }

@@ -75,6 +75,7 @@ class TutoringPolicy:
                 confidence_end=session.competency_ratio,
             )]
         session.set_current_problem(problem)
+        session.conversation_history = []
         session.phase = TutoringPhase.AGENT_LED
         step = await self.model_server.generate_tutoring_step(problem, TutoringPhase.AGENT_LED, [])
         actions: list[Action] = [DrawProblemAction(
@@ -82,28 +83,39 @@ class TutoringPolicy:
             divisor=problem["divisor"],
         )]
         actions += self._parse_drawing_commands(step.get("drawing_commands", []))
-        if step.get("speech"):
-            actions.append(SpeakAction(text=step["speech"]))
+        speech = step.get("speech", "")
+        if speech:
+            session.add_history("agent", speech)
+            actions.append(SpeakAction(text=speech))
         return actions
 
     async def _on_speech(self, event: StudentSpeechEvent, session: TutoringSession) -> list[Action]:
         if session.phase not in (TutoringPhase.AGENT_LED, TutoringPhase.COLLABORATIVE, TutoringPhase.CHILD_LED):
             return []
+        session.add_history("student", event.text)
         result = await self.model_server.classify_response(event.text, {
             "phase": session.phase.value,
             "problem": session.current_problem,
             "streak": session.confidence_streak,
+            "history": session.conversation_history,
         })
         quality = result.get("quality", "hesitant_correct")
         correct = quality in ("confident_correct", "hesitant_correct")
         session.record_response(correct=correct)
         actions: list[Action] = self._parse_drawing_commands(result.get("next_draw", []))
-        if result.get("speech"):
-            actions.append(SpeakAction(text=result["speech"]))
 
         if not correct:
             if quality == "fundamentally_wrong":
                 session.shift_phase(TutoringPhase.AGENT_LED)
+            # Generate a real tutoring step instead of just a vague remark
+            step = await self.model_server.generate_tutoring_step(
+                session.current_problem, session.phase, session.conversation_history
+            )
+            actions += self._parse_drawing_commands(step.get("drawing_commands", []))
+            speech = step.get("speech", "")
+            if speech:
+                session.add_history("agent", speech)
+                actions.append(SpeakAction(text=speech))
             return actions
 
         # Check phase upgrade thresholds
@@ -112,11 +124,13 @@ class TutoringPolicy:
             session.shift_phase(TutoringPhase.COLLABORATIVE)
             actions.append(ShiftControlAction(to="COLLABORATIVE"))
             actions.append(SpeakAction(text="Great work — now you tell me the next step."))
+            session.add_history("agent", "Great work — now you tell me the next step.")
             phase_shifted = True
         elif session.phase == TutoringPhase.COLLABORATIVE and session.confidence_streak >= self.collaborative_threshold:
             session.shift_phase(TutoringPhase.CHILD_LED)
             actions.append(ShiftControlAction(to="CHILD_LED"))
             actions.append(SpeakAction(text="You've got this — take it from here."))
+            session.add_history("agent", "You've got this — take it from here.")
             phase_shifted = True
 
         # Check problem completion — only if no phase shift happened this call
@@ -125,6 +139,17 @@ class TutoringPolicy:
                 session.complete_current_problem()
                 next_actions = await self._start_next_problem(session)
                 return actions + next_actions
+
+        # For correct answers without a phase shift, generate the next tutoring step
+        if not phase_shifted:
+            step = await self.model_server.generate_tutoring_step(
+                session.current_problem, session.phase, session.conversation_history
+            )
+            actions += self._parse_drawing_commands(step.get("drawing_commands", []))
+            speech = step.get("speech", "")
+            if speech:
+                session.add_history("agent", speech)
+                actions.append(SpeakAction(text=speech))
 
         return actions
 

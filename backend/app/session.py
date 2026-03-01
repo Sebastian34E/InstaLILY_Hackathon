@@ -25,7 +25,14 @@ class TutoringSession:
     total_responses: int = 0
     problems_done: int = 0
     phase_history: list = field(default_factory=list)
+    conversation_history: list = field(default_factory=list)
     frustrated: bool = False
+
+    def add_history(self, role: str, text: str) -> None:
+        self.conversation_history.append({"role": role, "text": text})
+        # Keep last 10 turns to avoid prompt bloat
+        if len(self.conversation_history) > 10:
+            self.conversation_history = self.conversation_history[-10:]
 
     def set_current_problem(self, problem: dict) -> None:
         self.current_problem = problem
@@ -55,6 +62,7 @@ class TutoringSession:
         self.problems_done += 1
         self.current_problem = None
         self.confidence_streak = 0
+        self.conversation_history = []
         self.phase = TutoringPhase.UNDERSTANDING_CONFIRMED
 
     @property

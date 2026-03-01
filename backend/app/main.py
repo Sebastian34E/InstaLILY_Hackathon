@@ -13,7 +13,6 @@ from app.models import parse_event
 from app.session import TutoringSession
 from app.policy import TutoringPolicy
 from app.model_server import MathTutorModelServer
-from app.worksheet_parser import parse_worksheet
 
 logger = logging.getLogger(__name__)
 
@@ -40,10 +39,18 @@ async def lifespan(app: FastAPI):
         collaborative_threshold=int(os.getenv("COLLAB_THRESHOLD", "3")),
     )
     session = TutoringSession()
-    # Load worksheet problems from PDF
-    pdf_path = Path(os.getenv("WORKSHEET_PDF", "worksheets/grade-4-long-division-basic-facts-a.pdf"))
-    worksheet_problems = parse_worksheet(pdf_path)
-    logger.info("Loaded %d worksheet problems", len(worksheet_problems))
+    # Load worksheet problems from division.json if present (frontend is the source of truth)
+    json_path = Path(os.getenv("WORKSHEET_JSON", "worksheets/division.json"))
+    try:
+        with open(json_path) as f:
+            raw = json.load(f)
+        worksheet_problems = [
+            {"dividend": p["dividend"], "divisor": p["divisor"]}
+            for p in raw["worksheet"]["problems"]
+        ]
+        logger.info("Loaded %d problems from %s", len(worksheet_problems), json_path)
+    except FileNotFoundError:
+        logger.info("division.json not found — /problems endpoint will return empty list (frontend manages problems)")
     logger.info("Ready.")
     yield
     logger.info("Shutting down.")

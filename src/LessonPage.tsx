@@ -31,12 +31,18 @@ function extractFirstInt(text: string): number | null {
 }
 
 
+// Pre-load problems from division.json so they're available before WS connects
+const PROBLEMS: Problem[] = worksheetData.worksheet.problems.map((p) => ({
+  dividend: p.dividend,
+  divisor: p.divisor,
+}));
+
 const LessonPage: React.FC = () => {
-  // ── Worksheet problems from backend ─────────────────────────────────────────
-  const [problems, setProblems] = useState<Problem[]>([]);
+  // ── Worksheet problems — seeded from division.json immediately ───────────────
+  const [problems, setProblems] = useState<Problem[]>(PROBLEMS);
   const [problemIndex, setProblemIndex] = useState(0);
   // Refs so handleAction (memoized) can always see current values
-  const problemsRef = useRef<Problem[]>([]);
+  const problemsRef = useRef<Problem[]>(PROBLEMS);
   const problemIndexRef = useRef(0);
 
   useEffect(() => { problemsRef.current = problems; }, [problems]);
@@ -112,22 +118,6 @@ const LessonPage: React.FC = () => {
     send,
     sessionActive && !sessionDone
   );
-
-  // Fetch problem list from backend HTTP endpoint
-  useEffect(() => {
-    if (!wsUrl) return;
-    const httpBase = wsUrl.replace(/^wss?:\/\//, "https://").replace(/\/ws$/, "");
-    fetch(`${httpBase}/problems`)
-      .then((r) => r.json())
-      .then((data: Problem[]) => {
-        if (Array.isArray(data) && data.length > 0) {
-          setProblems(data);
-          problemsRef.current = data;
-        }
-      })
-      .catch(() => {/* silently fall back */});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wsUrl]);
 
   // Auto-start: send the first problem as soon as WS connects
   useEffect(() => {
@@ -294,12 +284,28 @@ const LessonPage: React.FC = () => {
           ) : (
             <>
               <WhiteboardCanvas ref={whiteboardRef} />
-              <div className="mic-status">🎤 Listening for your answer…</div>
+              <div className="mic-status">🎤 Your turn — speak or type your answer below</div>
               {hasNextProblem && (
                 <button className="next-problem-btn" onClick={handleNextProblem}>
                   Next Problem →
                 </button>
               )}
+              <div className="chat-area chat-area-fixed">
+                <div className="chat-entry-row">
+                  <input
+                    type="text"
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && chatInput.trim()) {
+                        send({ type: "STUDENT_SPEECH", text: chatInput.trim(), t: Date.now() / 1000 });
+                        setChatInput("");
+                      }
+                    }}
+                    placeholder="Type your answer…"
+                  />
+                </div>
+              </div>
             </>
           )}
         </div>

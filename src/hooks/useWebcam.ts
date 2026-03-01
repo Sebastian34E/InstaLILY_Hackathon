@@ -64,7 +64,7 @@ export function useWebcam(
       const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
       const image = dataUrl.replace("data:image/jpeg;base64,", "");
       sendRef.current({ type: "FACE_FRAME", image, t: Date.now() / 1000 });
-    }, 2000);
+    }, 30000);
 
     return () => clearInterval(interval);
   }, [active]);
