@@ -235,46 +235,36 @@ const LessonPage: React.FC = () => {
     const phaseCss = phase.toLowerCase().replace(/_/g, "-");
     return (
       <div className="lesson-page">
-        {/* Video always in DOM while backend mode active — needed for face frames */}
-        <video
-          ref={videoRef}
-          autoPlay
-          muted
-          playsInline
-          style={sessionActive ? { display: "none" } : undefined}
-          className={!sessionActive ? "webcam-preview-large" : ""}
-        />
-        <canvas
-          ref={hiddenCanvasRef}
-          width={320}
-          height={240}
-          style={{ display: "none" }}
-        />
+        {/* Hidden face-frame infrastructure */}
+        <video ref={videoRef} autoPlay muted playsInline style={{ display: "none" }} />
+        <canvas ref={hiddenCanvasRef} width={320} height={240} style={{ display: "none" }} />
 
-        <div className="lesson-content">
-          <div className="backend-header">
-            <span className={`phase-badge phase-${phaseCss}`}>
-              {phase.replace(/_/g, " ")}
+        {/* Header strip — sits outside lesson-content so it's always at top */}
+        <div className="backend-header">
+          <span className={`phase-badge phase-${phaseCss}`}>
+            {phase.replace(/_/g, " ")}
+          </span>
+          {problems.length > 0 && !sessionDone && (
+            <span className="problem-counter">
+              Problem {problemIndex + 1} / {problems.length}
+              {activeProblem && (
+                <span className="problem-label">
+                  &nbsp;— {activeProblem.dividend} ÷ {activeProblem.divisor}
+                </span>
+              )}
             </span>
-            {problems.length > 0 && !sessionDone && (
-              <span className="problem-counter">
-                Problem {problemIndex + 1} of {problems.length}
-                {activeProblem && (
-                  <span className="problem-label">
-                    {" "}— {activeProblem.dividend} ÷ {activeProblem.divisor}
-                  </span>
-                )}
-              </span>
-            )}
-            {wsStatus === "connecting" && (
-              <span className="ws-status">Connecting…</span>
-            )}
-          </div>
+          )}
+          {wsStatus === "connecting" && (
+            <span className="ws-status">Connecting…</span>
+          )}
+        </div>
 
+        {/* Main content — fills remaining height */}
+        <div className="lesson-content">
           {sessionDone && summary ? (
             <div className="session-summary">
               <h2>Session Complete!</h2>
-              <p>{summary.problems_done} problem{summary.problems_done !== 1 ? "s" : ""} done</p>
+              <p>{summary.problems_done} problem{summary.problems_done !== 1 ? "s" : ""} solved</p>
               <p>Confidence: {Math.round(summary.confidence_end * 100)}%</p>
             </div>
           ) : !sessionActive ? (
@@ -284,14 +274,19 @@ const LessonPage: React.FC = () => {
           ) : (
             <>
               <WhiteboardCanvas ref={whiteboardRef} />
-              <div className="mic-status">🎤 Your turn — speak or type your answer below</div>
+              <div className="mic-status">🎤 speak or type your answer</div>
               {hasNextProblem && (
                 <button className="next-problem-btn" onClick={handleNextProblem}>
                   Next Problem →
                 </button>
               )}
-              <div className="chat-area chat-area-fixed">
+              <div className="chat-area">
                 <div className="chat-entry-row">
+                  <div className="chat-monster">
+                    <div className="chat-monster-eye chat-monster-eye-left" />
+                    <div className="chat-monster-eye chat-monster-eye-right" />
+                    <div className="chat-monster-mouth" />
+                  </div>
                   <input
                     type="text"
                     value={chatInput}
@@ -302,7 +297,8 @@ const LessonPage: React.FC = () => {
                         setChatInput("");
                       }
                     }}
-                    placeholder="Type your answer…"
+                    placeholder="Type your answer and press Enter…"
+                    autoComplete="off"
                   />
                 </div>
               </div>

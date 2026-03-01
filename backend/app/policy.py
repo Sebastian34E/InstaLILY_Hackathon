@@ -77,6 +77,8 @@ class TutoringPolicy:
             )]
         session.set_current_problem(problem)
         session.conversation_history = []
+        session.confidence_streak = 0
+        session.frustrated = False
         session.phase = TutoringPhase.AGENT_LED
         step = await self.model_server.generate_tutoring_step(problem, TutoringPhase.AGENT_LED, [], step_index=0)
         actions: list[Action] = [DrawProblemAction(
