@@ -1,6 +1,7 @@
 # backend/app/policy.py
 from __future__ import annotations
 import logging
+import re
 from app.session import TutoringSession, TutoringPhase
 from app.models import (
     Action, Event,
@@ -77,7 +78,7 @@ class TutoringPolicy:
         session.set_current_problem(problem)
         session.conversation_history = []
         session.phase = TutoringPhase.AGENT_LED
-        step = await self.model_server.generate_tutoring_step(problem, TutoringPhase.AGENT_LED, [])
+        step = await self.model_server.generate_tutoring_step(problem, TutoringPhase.AGENT_LED, [], step_index=0)
         actions: list[Action] = [DrawProblemAction(
             dividend=problem["dividend"],
             divisor=problem["divisor"],
@@ -89,9 +90,23 @@ class TutoringPolicy:
             actions.append(SpeakAction(text=speech))
         return actions
 
+    def _is_math_related(self, text: str) -> bool:
+        """Reject clearly off-topic input before hitting the model."""
+        text_lower = text.lower().strip()
+        # Must contain a number OR a math keyword
+        has_number = bool(re.search(r'\d', text_lower))
+        math_words = {"times", "divide", "divided", "minus", "plus", "subtract", "multiply",
+                      "remainder", "quotient", "answer", "step", "bring", "down", "write",
+                      "yes", "no", "right", "wrong", "don't", "dont", "know", "help", "think",
+                      "try", "guess", "maybe", "hmm", "um", "uh"}
+        has_math_word = bool(set(text_lower.split()) & math_words)
+        return has_number or has_math_word
+
     async def _on_speech(self, event: StudentSpeechEvent, session: TutoringSession) -> list[Action]:
         if session.phase not in (TutoringPhase.AGENT_LED, TutoringPhase.COLLABORATIVE, TutoringPhase.CHILD_LED):
             return []
+        if not self._is_math_related(event.text):
+            return [SpeakAction(text="Let's stay focused on our math problem! What's your answer?")]
         session.add_history("student", event.text)
         result = await self.model_server.classify_response(event.text, {
             "phase": session.phase.value,
@@ -101,8 +116,23 @@ class TutoringPolicy:
         })
         quality = result.get("quality", "hesitant_correct")
         correct = quality in ("confident_correct", "hesitant_correct")
+        completed_step_idx = session.confidence_streak  # index of step just answered (before increment)
         session.record_response(correct=correct)
         actions: list[Action] = self._parse_drawing_commands(result.get("next_draw", []))
+
+        # Draw the quotient digit the student just correctly identified
+        if correct and session.current_problem:
+            steps = self.model_server.division_steps_list(
+                session.current_problem["dividend"],
+                session.current_problem["divisor"],
+            )
+            if completed_step_idx < len(steps):
+                step_info = steps[completed_step_idx]
+                if step_info.get("position") and step_info.get("q") is not None:
+                    actions.append(DrawNumberAction(
+                        value=step_info["q"],
+                        position=step_info["position"],
+                    ))
 
         if not correct:
             if quality == "fundamentally_wrong":
@@ -133,17 +163,17 @@ class TutoringPolicy:
             session.add_history("agent", "You've got this — take it from here.")
             phase_shifted = True
 
-        # Check problem completion — only if no phase shift happened this call
-        if not phase_shifted and quality == "confident_correct" and session.phase == TutoringPhase.CHILD_LED:
-            if self._is_problem_complete(event.text, session.current_problem):
-                session.complete_current_problem()
-                next_actions = await self._start_next_problem(session)
-                return actions + next_actions
+        # Check problem completion: student gave the correct final quotient
+        if not phase_shifted and correct and self._student_gave_final_answer(event.text, session.current_problem, session.conversation_history):
+            session.complete_current_problem()
+            next_actions = await self._start_next_problem(session)
+            return actions + next_actions
 
-        # For correct answers without a phase shift, generate the next tutoring step
+        # For correct answers without completion, generate the next specific tutoring step
         if not phase_shifted:
             step = await self.model_server.generate_tutoring_step(
-                session.current_problem, session.phase, session.conversation_history
+                session.current_problem, session.phase, session.conversation_history,
+                step_index=session.confidence_streak,
             )
             actions += self._parse_drawing_commands(step.get("drawing_commands", []))
             speech = step.get("speech", "")
@@ -189,8 +219,13 @@ class TutoringPolicy:
                 logger.warning("Skipping malformed drawing command %r: %s", cmd, e)
         return result
 
-    def _is_problem_complete(self, text: str, problem: dict | None) -> bool:
+    def _student_gave_final_answer(self, text: str, problem: dict | None, history: list) -> bool:
+        """Return True if the student's response contains the correct quotient
+        and we've had at least one prior exchange (not just the opening question)."""
         if problem is None:
             return False
-        keywords = {"remainder", "done", "finished", "that's it", "complete", "r"}
-        return bool(set(text.lower().split()) & keywords)
+        correct_quotient = problem["dividend"] // problem["divisor"]
+        nums = [int(m) for m in re.findall(r"\d+", text)]
+        has_answer = correct_quotient in nums
+        had_exchange = len(history) >= 2  # at least agent intro + this student reply
+        return has_answer and had_exchange

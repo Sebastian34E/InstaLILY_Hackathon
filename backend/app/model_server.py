@@ -160,10 +160,12 @@ class MathTutorModelServer:
                 f"{history_text}"
                 f"Student just said: \"{response}\"\n\n"
                 f"Teaching phase: {phase}\n\n"
+                "IMPORTANT: You only respond to math-related answers. If the student says something unrelated to math, "
+                "reply with quality=hesitant_wrong and redirect them to the problem.\n\n"
                 "Decide:\n"
                 "- Is the student's response correct or on the right track for the CURRENT step?\n"
-                "- Give a short, encouraging 1-sentence reply that either confirms they're right or gently corrects them.\n"
-                "- Do NOT give away the full answer if they're wrong — just guide them to the next small step.\n\n"
+                "- Give a short, encouraging 1-sentence reply that confirms, corrects, or redirects.\n"
+                "- Do NOT give away the full answer if they're wrong.\n\n"
                 "Return ONLY valid JSON (no markdown):\n"
                 '{"quality": "confident_correct|hesitant_correct|hesitant_wrong|fundamentally_wrong", '
                 '"speech": "your 1-sentence response to the student", "next_draw": []}'
@@ -182,60 +184,115 @@ class MathTutorModelServer:
                 problem.get("dividend", 0) % max(problem.get("divisor", 1), 1),
             )
 
-    async def generate_tutoring_step(self, problem: dict, phase: Any, history: list) -> dict[str, Any]:
+    async def generate_tutoring_step(self, problem: dict, phase: Any, history: list, step_index: int = 0) -> dict[str, Any]:
         """
         Generate the next tutoring step.
-        Injects the full worked solution so Gemma can guide concretely
-        without doing arithmetic itself.
+        step_index = number of correct answers so far for this problem.
+        Injects the full worked solution so Gemma narrates concretely.
         """
         try:
             dividend = problem['dividend']
             divisor = problem['divisor']
 
-            solution = _compute_division_steps(dividend, divisor)
+            # Pre-compute all steps in Python so Gemma never has to do arithmetic
+            steps = self.division_steps_list(dividend, divisor)
+            total_steps = len(steps)
+            current_step = steps[min(step_index, total_steps - 1)]
+            next_step = steps[min(step_index + 1, total_steps - 1)] if step_index + 1 < total_steps else None
 
             history_text = ""
             if history:
-                lines = [f"  {h['role'].upper()}: {h['text']}" for h in history[-6:]]
-                history_text = "Conversation so far:\n" + "\n".join(lines) + "\n\n"
+                lines = [f"  {h['role'].upper()}: {h['text']}" for h in history[-4:]]
+                history_text = "Recent conversation:\n" + "\n".join(lines) + "\n\n"
 
             phase_str = str(phase).split(".")[-1]
-            phase_instruction = {
-                "AGENT_LED": (
-                    "You are leading. Walk through ONE step of the solution concretely. "
-                    "Then ask ONE simple yes/no or short-answer question to check understanding."
-                ),
-                "COLLABORATIVE": (
-                    "Ask the student what the next step is. Give a hint referencing the specific numbers if they're unsure."
-                ),
-                "CHILD_LED": (
-                    "The student is working independently. Only speak if they seem stuck. "
-                    "Give a minimal nudge."
-                ),
-            }.get(phase_str, "Walk through ONE step and ask the student to confirm.")
+
+            final_answer = dividend // divisor
+            remainder = dividend % divisor
+            all_steps_done = step_index >= total_steps
+
+            if all_steps_done:
+                # All digits worked through — ask for the assembled final answer
+                remainder_text = f" with a remainder of {remainder}" if remainder > 0 else ""
+                task = (
+                    f"All the steps are done! Ask the student to read off the final answer. "
+                    f"The correct answer is {final_answer}{remainder_text}."
+                )
+            elif step_index == 0:
+                task = (
+                    f"Introduce the problem {dividend} ÷ {divisor} and ask: "
+                    f"\"{current_step['question']}\""
+                )
+            elif phase_str == "AGENT_LED":
+                task = (
+                    f"The student just got step {step_index} right. "
+                    f"Confirm briefly, then state: \"{current_step['action']}\" "
+                    f"and ask: \"{current_step['question']}\""
+                )
+            elif phase_str == "COLLABORATIVE":
+                task = f"Ask the student what comes next. Hint: {current_step['question']}"
+            else:
+                task = f"Nudge: {current_step['question']}"
 
             prompt = (
-                f"You are a patient, encouraging math tutor helping a student (age 10-13) "
-                f"solve {dividend} ÷ {divisor}.\n\n"
-                f"The complete correct solution is:\n{solution}\n\n"
+                f"You are a friendly math tutor helping a student (age 10-13) solve {dividend} ÷ {divisor}.\n"
+                f"Problem step {step_index + 1} of {total_steps}.\n\n"
+                f"Your task: {task}\n\n"
                 f"{history_text}"
-                f"Teaching mode: {phase_instruction}\n\n"
                 "Rules:\n"
-                "- Use the solution above to be specific about numbers (e.g. 'How many times does 6 go into 20?').\n"
-                "- Do NOT repeat anything already said in the conversation.\n"
-                "- ONE step at a time. ONE question at a time. Wait for the student.\n"
-                "- Keep it to 1-2 sentences. Simple language.\n\n"
+                "- Use the EXACT numbers from the task above. Do not invent numbers.\n"
+                "- Do NOT repeat anything already said.\n"
+                "- 1-2 sentences max. Simple language for a 10-year-old.\n\n"
                 "Return ONLY valid JSON (no markdown):\n"
-                '{"speech": "your tutoring sentence here", "drawing_commands": []}'
+                '{"speech": "your sentence here", "drawing_commands": []}'
             )
             raw = await self._gemma_generate(prompt=prompt, images=[])
             result = self._parse_json(raw, fallback=None)
             if result and result.get("speech"):
                 return result
-            return _FALLBACK_TUTORING_STEPS[len(history) % len(_FALLBACK_TUTORING_STEPS)]
+            # Fallback: use the pre-computed step directly
+            return {"speech": f"{current_step['action']} {current_step['question']}", "drawing_commands": []}
         except Exception as e:
             logger.warning("generate_tutoring_step failed: %s", e)
-            return _FALLBACK_TUTORING_STEPS[len(history) % len(_FALLBACK_TUTORING_STEPS)]
+            return {"speech": f"Let's work through {dividend} ÷ {divisor} together. What do you think the answer is?", "drawing_commands": []}
+
+    def division_steps_list(self, dividend: int, divisor: int) -> list[dict]:
+        """Return each long division step with q digit and canvas position."""
+        digits = [int(d) for d in str(dividend)]
+        steps = []
+        current = 0
+        pos_idx = 0  # tracks which quotient_ position to write to
+        for i, digit in enumerate(digits):
+            current = current * 10 + digit
+            q = current // divisor
+            product = q * divisor
+            remainder = current - product
+            if i == 0 and q == 0:
+                steps.append({
+                    "action": f"{divisor} doesn't go into {current}, bring down the next digit.",
+                    "question": f"What do we get when we bring down the next digit?",
+                    "q": 0,
+                    "position": None,  # no quotient digit to write for leading zero
+                })
+                current = remainder
+                continue
+            steps.append({
+                "action": f"{divisor} goes into {current} {q} time{'s' if q != 1 else ''}. Write {q} above. Then {q} × {divisor} = {product}. Subtract: {current} − {product} = {remainder}.",
+                "question": f"How many times does {divisor} go into {current}?",
+                "q": q,
+                "position": f"quotient_{pos_idx}",
+            })
+            pos_idx += 1
+            current = remainder
+        if not steps:
+            q = dividend // divisor
+            steps.append({
+                "action": f"{divisor} goes into {dividend} exactly {q} times.",
+                "question": f"How many times does {divisor} go into {dividend}?",
+                "q": q,
+                "position": "quotient_0",
+            })
+        return steps
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
