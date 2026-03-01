@@ -1,15 +1,12 @@
-import React from 'react'
 import './App.css'
 import Card from './Card'
 import ProgressCircle from './ProgressCircle'
 import { Routes, Route, Link } from 'react-router-dom'
 import LessonPage from './LessonPage'
 
-// sample cards data
+// Single worksheet card — problems loaded from backend PDF at runtime
 const cards = [
   { title: 'Long Division', description: 'Practice dividing larger numbers step by step.', variant: 'division' as const },
-  { title: 'Times Table', description: 'Build multiplication speed and accuracy.', variant: 'times' as const },
-  { title: 'Addition', description: 'Strengthen addition facts and multi-digit sums.', variant: 'addition' as const },
 ];
 
 // training progress percentage
@@ -20,7 +17,6 @@ function Home() {
     <div className="homepage">
       <header>
         <h1>Hi InstaLily!</h1>
-        <p>Welcome to your homepage.</p>
       </header>
       <section className="progress-row">
         <ProgressCircle label="Training Progress" percent={trainingProgress} />
@@ -29,7 +25,11 @@ function Home() {
         <h2>Worksheet</h2>
         <div className="card-grid">
           {cards.map((card) => (
-            <Link key={card.title} to="/lesson" style={{ textDecoration: 'none' }}>
+            <Link
+              key={card.title}
+              to="/lesson"
+              style={{ textDecoration: 'none' }}
+            >
               <Card
                 title={card.title}
                 description={card.description}
